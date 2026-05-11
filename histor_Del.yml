@@ -1,0 +1,64 @@
+name: history Delet
+
+on:
+  workflow_dispatch:
+    inputs:
+      clean_downloads:
+        description: 'خالی کردن پوشه downloads'
+        type: boolean
+        default: true
+      clean_runs:
+        description: 'حذف تمام workflow runs'
+        type: boolean
+        default: false
+      confirm_runs:
+        description: 'برای حذف runs (اگر گزینه بالا true است) عبارت CONFIRM را وارد کنید'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  actions: write   # برای حذف runs
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🗑️ خالی کردن downloads
+        if: github.event.inputs.clean_downloads == 'true'
+        run: |
+          if [ -d "downloads" ]; then
+            rm -rf downloads/*
+            echo "✅ پوشه downloads خالی شد."
+          else
+            echo "⚠️ پوشه downloads وجود نداشت."
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add downloads/
+          git commit -m "🧹 خالی کردن downloads [skip ci]" || echo "بدون تغییر"
+          git push
+
+      - name: 🧹 حذف workflow runs
+        if: github.event.inputs.clean_runs == 'true'
+        run: |
+          if [ "${{ github.event.inputs.confirm_runs }}" != "CONFIRM" ]; then
+            echo "::error::برای حذف runs، عبارت CONFIRM را وارد کنید."
+            exit 1
+          fi
+          GH_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          REPO="${{ github.repository }}"
+          RUNS=$(curl -s -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/$REPO/actions/runs?per_page=100")
+          RUN_IDS=$(echo "$RUNS" | jq '.workflow_runs[].id')
+          for id in $RUN_IDS; do
+            curl -X DELETE -s -H "Authorization: token $GH_TOKEN" \
+              "https://api.github.com/repos/$REPO/actions/runs/$id"
+            echo "حذف run: $id"
+            sleep 0.5
+          done
+          echo "✅ حذف runs انجام شد."
