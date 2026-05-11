@@ -76,7 +76,7 @@ jobs:
             exit 1
           fi
 
-          # متغیرهای ثابت (فرمت و کیفیت)
+          # متغیرهای ثابت
           if [[ "${{ github.event.inputs.output_format }}" == "mp3 (audio only)" ]]; then
             FMT="mp3"
           else
@@ -91,14 +91,13 @@ jobs:
             echo "Processing video $((idx+1)) of $TOTAL: $url"
             echo "=========================================="
 
-            # صادر کردن متغیرهای محیطی برای اسکریپت پایتون
             export CURRENT_URL="$url"
             export CURRENT_INDEX="$idx"
             export INPUT_FORMAT="$FMT"
             export INPUT_QUALITY="$QUALITY"
 
             # مرحله ۱: دریافت لینک دانلود و اطلاعات
-            python3 << 'EOF'
+            python3 <<'EOF'
 import os, sys, time, re, requests, json
 from datetime import datetime
 
@@ -170,7 +169,7 @@ with open(f"all_videos_info/video_{IDX}.json", "w") as f:
 EOF
 
             # مرحله ۲: دانلود فایل
-            python3 << 'EOF'
+            python3 <<'EOF'
 import json, os, urllib.request
 idx = int(os.environ['CURRENT_INDEX'])
 with open(f"all_videos_info/video_{idx}.json", "r") as f:
@@ -185,7 +184,7 @@ EOF
 
             # مرحله ۳: تقسیم فایل در صورت نیاز
             export MAX_PART_MB="$MAX_MB"
-            python3 << 'EOF'
+            python3 <<'EOF'
 import json, os, subprocess
 idx = int(os.environ['CURRENT_INDEX'])
 thresh_mb = int(os.environ['MAX_PART_MB'])
