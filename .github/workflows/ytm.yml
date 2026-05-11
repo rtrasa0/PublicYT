@@ -64,7 +64,6 @@ jobs:
         id: process
         run: |
           mkdir -p release_files all_videos_info
-
           IFS=' ' read -ra URL_ARRAY <<< "${{ github.event.inputs.video_urls }}"
           URL_ARRAY=("${URL_ARRAY[@]:0:5}")
           TOTAL=${#URL_ARRAY[@]}
@@ -73,7 +72,6 @@ jobs:
             echo "::error::No valid URLs provided"
             exit 1
           fi
-
           if [[ "${{ github.event.inputs.output_format }}" == "mp3 (audio only)" ]]; then
             FMT="mp3"
           else
@@ -81,7 +79,6 @@ jobs:
           fi
           QUALITY="${{ github.event.inputs.desired_quality }}"
           MAX_MB="${{ github.event.inputs.max_part_mb }}"
-
           for idx in "${!URL_ARRAY[@]}"; do
             url="${URL_ARRAY[$idx]}"
             echo "=========================================="
@@ -237,12 +234,9 @@ PYEOF
           name: "دانلود گروهی YouTube - ${{ steps.get_date.outputs.date }}"
           body: |
             **📦 دانلود گروهی ویدیوها**
-
             تعداد ویدیوها: `$(ls release_files | wc -l)`
-
             لینک‌های دریافتی:
             ${{ github.event.inputs.video_urls }}
-
             کیفیت: ${{ github.event.inputs.desired_quality }}
             فرمت: ${{ github.event.inputs.output_format }}
             
