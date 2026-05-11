@@ -1,4 +1,4 @@
-name: History Delet
+name: History Delete
 
 on:
   workflow_dispatch:
