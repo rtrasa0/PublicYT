@@ -1,4 +1,4 @@
-name: پاک‌کن پوشه downloads
+name: Downloads Remover
 
 on:
   workflow_dispatch:
