@@ -18,10 +18,10 @@ on:
         default: 'mp4 (video)'
 
       desired_quality:
-        description: 'کیفیت (ویدیو: 720p, 1080p | صدا: 192kbps, 320kbps)'
+        description: 'کیفیت (ویدیو: 144p,240p,360p,480p,720p,1080p | صدا: 64kbps,128kbps,192kbps,320kbps)'
         required: false
         type: string
-        default: '720p'
+        default: '360p'
 
       max_part_mb:
         description: 'حداکثر حجم هر قسمت (MB) - 0 = خودکار ۱۸۰۰ مگابایت'
@@ -69,27 +69,41 @@ jobs:
         run: |
           python3 << 'EOF'
           import os, sys, time, re, requests
+          from datetime import datetime
 
           URL  = os.environ.get('INPUT_URL')
-          FMT  = os.environ.get('INPUT_FORMAT')
+          FMT  = os.environ.get('INPUT_FORMAT')   # 'mp4' or 'mp3'
           QUAL = os.environ.get('INPUT_QUALITY')
 
-          is_audio = FMT == 'mp3'
-          if is_audio:
-              QUAL = QUAL if QUAL in ('64kbps','128kbps','192kbps','320kbps') else '192kbps'
-          else:
-              QUAL = QUAL if QUAL in ('720p','1080p') else '720p'
+          is_audio = (FMT == 'mp3')
 
+          # ----- Quality validation -----
+          if is_audio:
+              valid_bitrates = ['64kbps', '128kbps', '192kbps', '320kbps']
+              if QUAL not in valid_bitrates:
+                  print(f"::warning::Bitrate '{QUAL}' نامعتبر، استفاده از 192kbps")
+                  QUAL = '192kbps'
+          else:
+              valid_video_qualities = ['144p', '240p', '360p', '480p', '720p', '1080p', '1440p', '2160p']
+              if QUAL not in valid_video_qualities:
+                  print(f"::warning::کیفیت '{QUAL}' پشتیبانی نمی‌شود، استفاده از 720p")
+                  QUAL = '720p'
+
+          # ----- Build API payload -----
           payload = {
               "url": URL,
               "os": "linux",
-              "output": {"type": "audio" if is_audio else "video", "format": FMT}
+              "output": {
+                  "type": "audio" if is_audio else "video",
+                  "format": FMT
+              }
           }
           if is_audio:
               payload["audio"] = {"bitrate": QUAL}
           else:
               payload["output"]["quality"] = QUAL
 
+          # ----- Send request -----
           s = requests.Session()
           s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
           s.get("https://media.ytmp3.gg/")
@@ -101,6 +115,7 @@ jobs:
           status_url = data.get('statusUrl')
           title = data.get('title', 'video')
 
+          # ----- Poll for completion -----
           dl_url = None
           for _ in range(150):
               time.sleep(2)
@@ -117,17 +132,25 @@ jobs:
               print("::error::Could not get download link")
               sys.exit(1)
 
-          vid   = re.search(r'(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})', URL)[1]
-          clean = re.sub(r'[^a-zA-Z0-9\-_()\[\]]', '_', title.replace(' ', '_'))
-          clean = re.sub(r'_+', '_', clean).strip('_')[:70] or vid
-          fname = f"{clean}_{vid}_{QUAL}.{FMT}"
+          # ----- Generate safe filename and folder name -----
+          video_id = re.search(r'(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})', URL)[1]
+          clean_title = re.sub(r'[^a-zA-Z0-9\-_()\[\]]', '_', title.replace(' ', '_'))
+          clean_title = re.sub(r'_+', '_', clean_title).strip('_')[:70] or video_id
+          filename = f"{clean_title}_{video_id}_{QUAL}.{FMT}"
+          # پوشه اختصاصی برای این ویدیو (از تاریخ و آی‌دی استفاده می‌کنیم)
+          timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+          folder_name = f"{clean_title}_{video_id}_{timestamp}"
+          # پاک کردن کاراکترهای غیرمجاز احتمالی
+          folder_name = re.sub(r'[^a-zA-Z0-9\-_()\[\]]', '_', folder_name)
 
+          # ----- Save info for next steps -----
           with open(".download_info", "w", encoding="utf-8") as f:
-              f.write(f"{dl_url}\n{fname}\n{title}")
+              f.write(f"{dl_url}\n{filename}\n{title}\n{folder_name}")
 
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"filename={fname}\n")
+              f.write(f"filename={filename}\n")
               f.write(f"title={title}\n")
+              f.write(f"folder={folder_name}\n")
           EOF
         env:
           INPUT_URL:     ${{ github.event.inputs.video_url }}
@@ -138,11 +161,11 @@ jobs:
         run: |
           DL_URL=$(head -1 .download_info)
           FILENAME=$(sed -n '2p' .download_info)
-          # همه فایل‌های نهایی در release_files جمع می‌شن
-          mkdir -p release_files
-          echo "Downloading: $FILENAME"
-          curl -L --fail --progress-bar -o "release_files/$FILENAME" "$DL_URL"
-          if [ ! -s "release_files/$FILENAME" ]; then
+          FOLDER=$(sed -n '4p' .download_info)
+          mkdir -p "release_files/$FOLDER"
+          echo "Downloading: $FILENAME into folder $FOLDER"
+          curl -L --fail --progress-bar -o "release_files/$FOLDER/$FILENAME" "$DL_URL"
+          if [ ! -s "release_files/$FOLDER/$FILENAME" ]; then
             echo "::error::Downloaded file is empty!"
             exit 1
           fi
@@ -150,43 +173,45 @@ jobs:
       - name: ✂️ Split Large File (if needed)
         run: |
           FILENAME="${{ steps.retrieve.outputs.filename }}"
+          FOLDER="${{ steps.retrieve.outputs.folder }}"
           THRESH_MB="${{ github.event.inputs.max_part_mb }}"
           if [[ "$THRESH_MB" -le 0 ]] || [[ "$THRESH_MB" -gt 1900 ]]; then
             THRESH_MB=1800
           fi
-          FILESIZE=$(stat -c%s "release_files/$FILENAME" 2>/dev/null || echo 0)
+          cd "release_files/$FOLDER"
+          FILESIZE=$(stat -c%s "$FILENAME" 2>/dev/null || echo 0)
           THRESH_BYTES=$((THRESH_MB * 1024 * 1024))
 
           if [ "$FILESIZE" -gt "$THRESH_BYTES" ]; then
-            echo "🔪 Splitting into ${THRESH_MB}MB parts..."
+            echo "🔪 Splitting into ${THRESH_MB}MB parts inside $FOLDER..."
             BASE="${FILENAME%.*}"
-            # split directly inside release_files
-            cd release_files
             zip -r -s "${THRESH_MB}m" "${BASE}.zip" -- "$FILENAME"
             rm -- "$FILENAME"
-            cd ..
             echo "Parts created:"
-            ls -lh release_files/
+            ls -lh
           else
             echo "📦 No split needed ($(( FILESIZE / 1024 / 1024 )) MB)"
           fi
+          cd ../..
 
       - name: 📅 Get Current Date
         id: get_date
         run: echo "date=$(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
 
-      - name: 📤 Push to Repository
+      - name: 📤 Push to Repository (هر ویدیو در پوشه مجزا)
         if: github.event.inputs.upload_method == 'repository (push to repo)'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          FOLDER="${{ steps.retrieve.outputs.folder }}"
           mkdir -p downloads
-          mv release_files/* downloads/
-          git add downloads/
-          git commit -m "⬇️ YouTube: ${{ steps.retrieve.outputs.filename }} [skip ci]" || echo "Nothing to commit"
+          # انتقال تمام محتویات release_files/$FOLDER به downloads/$FOLDER
+          mv "release_files/$FOLDER" "downloads/"
+          git add "downloads/$FOLDER"
+          git commit -m "📁 ویدیو جدید: ${{ steps.retrieve.outputs.folder }} [skip ci]" || echo "Nothing to commit"
           git push
 
-      - name: 📤 Upload to GitHub Releases
+      - name: 📤 Upload to GitHub Releases (با حفظ نام پوشه در فایل‌ها)
         if: github.event.inputs.upload_method == 'release (GitHub Releases)'
         uses: softprops/action-gh-release@v2
         with:
@@ -200,10 +225,11 @@ jobs:
             **Quality:** ${{ github.event.inputs.desired_quality }}
             **Format:** ${{ github.event.inputs.output_format }}
             **Downloaded on:** ${{ steps.get_date.outputs.date }}
+            **Folder name:** `${{ steps.retrieve.outputs.folder }}`
 
             ---
             Powered by Meli-Action ⚡
-          files: release_files/*
+          files: release_files/${{ steps.retrieve.outputs.folder }}/*
           token: ${{ secrets.GITHUB_TOKEN }}
           draft: false
           prerelease: false
