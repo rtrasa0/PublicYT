@@ -1,4 +1,4 @@
-name: دانلودر یوتیوب (لینک‌ها با فاصله)
+name: مولتی یوتیوب 
 
 on:
   workflow_dispatch:
