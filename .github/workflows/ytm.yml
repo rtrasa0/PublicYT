@@ -65,18 +65,15 @@ jobs:
         run: |
           mkdir -p release_files all_videos_info
 
-          # خواندن لینک‌ها با جداکننده فاصله
           IFS=' ' read -ra URL_ARRAY <<< "${{ github.event.inputs.video_urls }}"
           URL_ARRAY=("${URL_ARRAY[@]:0:5}")
           TOTAL=${#URL_ARRAY[@]}
           echo "Total videos to process: $TOTAL"
-
           if [ $TOTAL -eq 0 ]; then
             echo "::error::No valid URLs provided"
             exit 1
           fi
 
-          # متغیرهای ثابت
           if [[ "${{ github.event.inputs.output_format }}" == "mp3 (audio only)" ]]; then
             FMT="mp3"
           else
@@ -90,14 +87,13 @@ jobs:
             echo "=========================================="
             echo "Processing video $((idx+1)) of $TOTAL: $url"
             echo "=========================================="
-
             export CURRENT_URL="$url"
             export CURRENT_INDEX="$idx"
             export INPUT_FORMAT="$FMT"
             export INPUT_QUALITY="$QUALITY"
 
-            # مرحله ۱: دریافت لینک دانلود و اطلاعات
-            python3 <<'EOF'
+            # مرحله ۱: دریافت لینک دانلود
+            cat > get_link.py <<'PYEOF'
 import os, sys, time, re, requests, json
 from datetime import datetime
 
@@ -166,10 +162,11 @@ info = {
 }
 with open(f"all_videos_info/video_{IDX}.json", "w") as f:
     json.dump(info, f)
-EOF
+PYEOF
+            python3 get_link.py
 
             # مرحله ۲: دانلود فایل
-            python3 <<'EOF'
+            cat > download.py <<'PYEOF'
 import json, os, urllib.request
 idx = int(os.environ['CURRENT_INDEX'])
 with open(f"all_videos_info/video_{idx}.json", "r") as f:
@@ -180,11 +177,12 @@ dl_url = info['dl_url']
 os.makedirs(f"release_files/{folder}", exist_ok=True)
 print(f"Downloading [{idx+1}]: {filename}")
 urllib.request.urlretrieve(dl_url, f"release_files/{folder}/{filename}")
-EOF
+PYEOF
+            python3 download.py
 
-            # مرحله ۳: تقسیم فایل در صورت نیاز
+            # مرحله ۳: تقسیم فایل
             export MAX_PART_MB="$MAX_MB"
-            python3 <<'EOF'
+            cat > split.py <<'PYEOF'
 import json, os, subprocess
 idx = int(os.environ['CURRENT_INDEX'])
 thresh_mb = int(os.environ['MAX_PART_MB'])
@@ -205,7 +203,8 @@ if size_bytes > thresh_bytes:
     print(f"Split {filename} into parts")
 else:
     print(f"No split needed for {filename}")
-EOF
+PYEOF
+            python3 split.py
 
             echo "✅ Video $((idx+1)) done."
           done
@@ -256,4 +255,4 @@ EOF
 
       - name: 🧹 Cleanup
         if: always()
-        run: rm -rf release_files all_videos_info 2>/dev/null || true
+        run: rm -rf release_files all_videos_info get_link.py download.py split.py 2>/dev/null || true
