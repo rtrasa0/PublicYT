@@ -10,11 +10,7 @@ on:
       clean_runs:
         description: 'حذف تمام workflow runs'
         type: boolean
-        default: true          # ← تغییر: پیش‌فرض true
-      confirm_runs:
-        description: 'برای حذف runs (اگر گزینه بالا true است) عبارت CONFIRM را وارد کنید'
-        required: false
-        type: string
+        default: true
 
 permissions:
   contents: write
@@ -46,19 +42,22 @@ jobs:
       - name: 🧹 حذف workflow runs
         if: github.event.inputs.clean_runs == 'true'
         run: |
-          if [ "${{ github.event.inputs.confirm_runs }}" != "CONFIRM" ]; then
-            echo "::error::برای حذف runs، عبارت CONFIRM را وارد کنید."
-            exit 1
-          fi
           GH_TOKEN=${{ secrets.GITHUB_TOKEN }}
           REPO="${{ github.repository }}"
+          echo "در حال دریافت لیست همه runs..."
           RUNS=$(curl -s -H "Authorization: token $GH_TOKEN" \
             "https://api.github.com/repos/$REPO/actions/runs?per_page=100")
           RUN_IDS=$(echo "$RUNS" | jq '.workflow_runs[].id')
+          if [ -z "$RUN_IDS" ]; then
+            echo "✅ هیچ run ای برای حذف وجود ندارد."
+            exit 0
+          fi
+          TOTAL=$(echo "$RUN_IDS" | wc -w)
+          echo "$TOTAL run پیدا شد. شروع حذف..."
           for id in $RUN_IDS; do
+            echo "حذف run: $id"
             curl -X DELETE -s -H "Authorization: token $GH_TOKEN" \
               "https://api.github.com/repos/$REPO/actions/runs/$id"
-            echo "حذف run: $id"
             sleep 0.5
           done
-          echo "✅ حذف runs انجام شد."
+          echo "✅ تمام $TOTAL run حذف شدند."
