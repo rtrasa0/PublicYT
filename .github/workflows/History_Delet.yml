@@ -1,4 +1,4 @@
-name: history Delet
+name: History Delet
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ on:
       clean_runs:
         description: 'حذف تمام workflow runs'
         type: boolean
-        default: false
+        default: true          # ← تغییر: پیش‌فرض true
       confirm_runs:
         description: 'برای حذف runs (اگر گزینه بالا true است) عبارت CONFIRM را وارد کنید'
         required: false
@@ -18,7 +18,7 @@ on:
 
 permissions:
   contents: write
-  actions: write   # برای حذف runs
+  actions: write
 
 jobs:
   clean:
