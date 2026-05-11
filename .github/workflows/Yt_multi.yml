@@ -1,11 +1,10 @@
-name: "مولتی یوتیوب" 
-
+name: دانلودر یوتیوب مولتی
 
 on:
   workflow_dispatch:
     inputs:
       video_urls:
-        description: 'لینک‌های یوتیوب (حداکثر ۵ لینک، هر لینک در یک خط)'
+        description: 'لینک‌های یوتیوب (حداکثر ۵ لینک، با فاصله از هم جدا کنید) مثال: https://youtu.be/aaa https://youtu.be/bbb'
         required: true
         type: string
 
@@ -28,7 +27,7 @@ on:
         description: 'حداکثر حجم هر قسمت (MB) - 0 = خودکار ۱۸۰۰ مگابایت'
         required: false
         type: string
-        default: '94'
+        default: '90'
 
       upload_method:
         description: '📤 روش ذخیره نهایی'
@@ -51,7 +50,7 @@ permissions:
 jobs:
   youtube-download:
     runs-on: ubuntu-latest
-    timeout-minutes: 120   # زمان بیشتر برای ۵ ویدیو
+    timeout-minutes: 120
 
     steps:
       - name: 📂 Checkout Repository
@@ -66,30 +65,28 @@ jobs:
           sudo apt-get install -y zip curl python3 python3-pip
           pip3 install --quiet requests
 
-      - name: 🔄 Process All Videos
+      - name: 🔄 Process All Videos (Space-separated URLs)
         id: process
         run: |
-          # آماده‌سازی پوشه اصلی
           mkdir -p release_files all_videos_info
           
-          # خواندن لینک‌ها (حداکثر ۵ خط غیرخالی)
-          mapfile -t urls < <(echo "${{ github.event.inputs.video_urls }}" | grep -v '^\s*$' | head -5)
+          # خواندن لینک‌ها (تقسیم بر اساس فاصله) - حداکثر ۵ تا
+          read -ra urls <<< "${{ github.event.inputs.video_urls }}"
+          urls=("${urls[@]:0:5}")  # فقط ۵ لینک اول
           total=${#urls[@]}
-          echo "Total videos to process: $total"
+          echo "Total videos: $total"
           
           if [ $total -eq 0 ]; then
             echo "::error::No valid URLs provided"
             exit 1
           fi
           
-          # حلقه برای هر لینک
           for i in "${!urls[@]}"; do
             url="${urls[$i]}"
             echo "=========================================="
             echo "Processing video $((i+1)) of $total: $url"
             echo "=========================================="
             
-            # مرحله ۱: دریافت لینک دانلود و اطلاعات ویدیو
             python3 << 'EOF'
             import os, sys, time, re, requests, json
             from datetime import datetime
@@ -100,7 +97,6 @@ jobs:
             QUAL = os.environ['INPUT_QUALITY']
             is_audio = (FMT == 'mp3')
 
-            # اعتبارسنجی کیفیت
             if is_audio:
                 valid = ['64kbps','128kbps','192kbps','320kbps']
                 if QUAL not in valid: QUAL = '192kbps'
@@ -154,7 +150,6 @@ jobs:
                 folder = f"{clean_title}_{video_id}_{timestamp}"
             folder = re.sub(r'[^a-zA-Z0-9\-_()\[\]]', '_', folder)
 
-            # ذخیره اطلاعات برای این ویدیو در فایل موقتی
             info = {
                 "url": URL, "dl_url": dl_url, "filename": filename,
                 "title": title, "folder": folder, "index": IDX
@@ -168,7 +163,6 @@ jobs:
               INPUT_FORMAT: ${{ github.event.inputs.output_format == 'mp3 (audio only)' && 'mp3' || 'mp4' }}
               INPUT_QUALITY: ${{ github.event.inputs.desired_quality }}
             
-            # مرحله ۲: دانلود فایل
             python3 << 'EOF'
             import json, os, urllib.request
             idx = int(os.environ['CURRENT_INDEX'])
@@ -184,7 +178,6 @@ jobs:
             env:
               CURRENT_INDEX: ${{ i }}
             
-            # مرحله ۳: تقسیم فایل (در صورت نیاز)
             python3 << 'EOF'
             import json, os, subprocess
             idx = int(os.environ['CURRENT_INDEX'])
@@ -214,14 +207,13 @@ jobs:
             echo "✅ Video $((i+1)) done."
           done
           
-          # جمع‌آوری نام پوشه‌ها برای مرحله بعد
           echo "folders=$(ls release_files | paste -sd ',' -)" >> $GITHUB_OUTPUT
 
       - name: 📅 Get Current Date
         id: get_date
         run: echo "date=$(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
 
-      - name: 📤 Push to Repository (همه پوشه‌ها)
+      - name: 📤 Push to Repository
         if: github.event.inputs.upload_method == 'repository (push to repo)'
         run: |
           git config user.name "github-actions[bot]"
@@ -232,10 +224,10 @@ jobs:
             mv "release_files/$folder" "downloads/"
           done
           git add downloads/
-          git commit -m "📁 افزودن ${#folders} ویدیو جدید [skip ci]" || echo "Nothing to commit"
+          git commit -m "📁 افزودن چند ویدیو جدید [skip ci]" || echo "Nothing to commit"
           git push origin main
 
-      - name: 📤 Upload to GitHub Releases (همه فایل‌ها)
+      - name: 📤 Upload to GitHub Releases
         if: github.event.inputs.upload_method == 'release (GitHub Releases)'
         uses: softprops/action-gh-release@v2
         with:
@@ -261,4 +253,4 @@ jobs:
 
       - name: 🧹 Cleanup
         if: always()
-        run: rm -rf release_files all_videos_info .download_info 2>/dev/null || true
+        run: rm -rf release_files all_videos_info 2>/dev/null || true
