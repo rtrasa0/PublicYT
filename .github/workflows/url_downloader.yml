@@ -127,7 +127,9 @@ jobs:
 
           git commit -m "Direct Download: ${{ steps.download.outputs.filename }} [skip ci]" || echo "Nothing to commit"
 
-          git push
+          # رفع مشکل push با دریافت و rebase تغییرات remote
+          git pull --rebase origin main
+          git push origin main
 
       - name: Upload to GitHub Releases
         if: github.event.inputs.upload_method == 'release'
