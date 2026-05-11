@@ -57,6 +57,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0   # برای git pull نیاز به تاریخچه کامل است
 
       - name: 🔧 Install Dependencies
         run: |
@@ -137,13 +138,16 @@ jobs:
           clean_title = re.sub(r'[^a-zA-Z0-9\-_()\[\]]', '_', title.replace(' ', '_'))
           clean_title = re.sub(r'_+', '_', clean_title).strip('_')[:70] or video_id
           filename = f"{clean_title}_{video_id}_{QUAL}.{FMT}"
-          # پوشه اختصاصی برای این ویدیو (از تاریخ و آی‌دی استفاده می‌کنیم)
+          
+          # ساخت نام پوشه (اگر عنوان تکراری شد، فقط از video_id استفاده کن)
           timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-          folder_name = f"{clean_title}_{video_id}_{timestamp}"
-          # پاک کردن کاراکترهای غیرمجاز احتمالی
+          if clean_title == video_id:
+              folder_name = f"{video_id}_{timestamp}"
+          else:
+              folder_name = f"{clean_title}_{video_id}_{timestamp}"
           folder_name = re.sub(r'[^a-zA-Z0-9\-_()\[\]]', '_', folder_name)
 
-          # ----- Save info for next steps -----
+          # ----- Save info -----
           with open(".download_info", "w", encoding="utf-8") as f:
               f.write(f"{dl_url}\n{filename}\n{title}\n{folder_name}")
 
@@ -203,15 +207,22 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # همگام‌سازی با آخرین تغییرات ریموت
+          git pull --rebase --strategy-option=theirs origin main
+          
           FOLDER="${{ steps.retrieve.outputs.folder }}"
           mkdir -p downloads
-          # انتقال تمام محتویات release_files/$FOLDER به downloads/$FOLDER
-          mv "release_files/$FOLDER" "downloads/"
-          git add "downloads/$FOLDER"
-          git commit -m "📁 ویدیو جدید: ${{ steps.retrieve.outputs.folder }} [skip ci]" || echo "Nothing to commit"
-          git push
+          if [ -d "release_files/$FOLDER" ]; then
+            mv "release_files/$FOLDER" "downloads/"
+            git add "downloads/$FOLDER"
+            git commit -m "📁 ویدیو جدید: $FOLDER [skip ci]" || echo "No new files to commit"
+            git push origin main
+          else
+            echo "Folder not found, skipping push"
+          fi
 
-      - name: 📤 Upload to GitHub Releases (با حفظ نام پوشه در فایل‌ها)
+      - name: 📤 Upload to GitHub Releases (با حفظ نام پوشه در توضیحات)
         if: github.event.inputs.upload_method == 'release (GitHub Releases)'
         uses: softprops/action-gh-release@v2
         with:
