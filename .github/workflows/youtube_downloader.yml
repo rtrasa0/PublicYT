@@ -1,10 +1,15 @@
-name: دانلودر یوتیوب
+name: دانلودر یوتیوب 
 
 on:
   workflow_dispatch:
     inputs:
-      video_url:
-        description: 'YouTube video URL'
+      video_url_1:
+        description: '🎬 لینک اول'
+        required: true
+        type: string
+
+      video_url_2:
+        description: '🎬 لینک دوم'
         required: true
         type: string
 
@@ -50,14 +55,14 @@ permissions:
 jobs:
   youtube-download:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 50
 
     steps:
       - name: 📂 Checkout Repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0   # برای git pull نیاز به تاریخچه کامل است
+          fetch-depth: 0
 
       - name: 🔧 Install Dependencies
         run: |
@@ -65,15 +70,17 @@ jobs:
           sudo apt-get install -y zip curl python3 python3-pip
           pip3 install --quiet requests
 
-      - name: 🔗 Get Download Link
-        id: retrieve
+      - name: 🔗 Get Download Links (two videos)
         run: |
           python3 << 'EOF'
           import os, sys, time, re, requests
           from datetime import datetime
 
-          URL  = os.environ.get('INPUT_URL')
-          FMT  = os.environ.get('INPUT_FORMAT')   # 'mp4' or 'mp3'
+          URLS = [
+            os.environ.get('INPUT_URL_1'),
+            os.environ.get('INPUT_URL_2')
+          ]
+          FMT  = os.environ.get('INPUT_FORMAT')
           QUAL = os.environ.get('INPUT_QUALITY')
 
           is_audio = (FMT == 'mp3')
@@ -90,162 +97,165 @@ jobs:
                   print(f"::warning::کیفیت '{QUAL}' پشتیبانی نمی‌شود، استفاده از 720p")
                   QUAL = '720p'
 
-          # ----- Build API payload -----
-          payload = {
-              "url": URL,
-              "os": "linux",
-              "output": {
-                  "type": "audio" if is_audio else "video",
-                  "format": FMT
-              }
-          }
-          if is_audio:
-              payload["audio"] = {"bitrate": QUAL}
-          else:
-              payload["output"]["quality"] = QUAL
-
-          # ----- Send request -----
           s = requests.Session()
           s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
           s.get("https://media.ytmp3.gg/")
 
-          resp = s.post("https://hub.ytconvert.org/api/download", json=payload, timeout=30)
-          resp.raise_for_status()
-          data = resp.json()
-
-          status_url = data.get('statusUrl')
-          title = data.get('title', 'video')
-
-          # ----- Poll for completion -----
-          dl_url = None
-          for _ in range(150):
-              time.sleep(2)
-              r = s.get(status_url, timeout=20)
-              status = r.json()
-              if status.get('status') == 'completed':
-                  dl_url = status.get('downloadUrl')
-                  break
-              if status.get('status') == 'failed':
-                  print("::error::Server failed to prepare the video")
+          results = []
+          for url in URLS:
+              if not url or not url.strip():
+                  print("::error::One of the URLs is empty")
                   sys.exit(1)
 
-          if not dl_url:
-              print("::error::Could not get download link")
-              sys.exit(1)
+              print(f"Processing: {url}")
+              payload = {
+                  "url": url,
+                  "os": "linux",
+                  "output": {
+                      "type": "audio" if is_audio else "video",
+                      "format": FMT
+                  }
+              }
+              if is_audio:
+                  payload["audio"] = {"bitrate": QUAL}
+              else:
+                  payload["output"]["quality"] = QUAL
 
-          # ----- ساخت نام فایل و پوشه با عنوان، کیفیت و زمان -----
-          video_id = re.search(r'(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})', URL)
-          video_id = video_id[1] if video_id else 'unknown'
-          
-          clean_title = re.sub(r'[^a-zA-Z0-9\-_()\[\]]', '_', title.replace(' ', '_'))
-          clean_title = re.sub(r'_+', '_', clean_title).strip('_')[:70]
-          if not clean_title:
-              clean_title = video_id
+              resp = s.post("https://hub.ytconvert.org/api/download", json=payload, timeout=30)
+              resp.raise_for_status()
+              data = resp.json()
 
-          timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-          
-          # ترکیب نهایی: عنوان + کیفیت + زمان
-          filename = f"{clean_title}_{QUAL}_{timestamp}.{FMT}"
-          folder_name = f"{clean_title}_{QUAL}_{timestamp}"
+              status_url = data.get('statusUrl')
+              title = data.get('title', 'video')
 
-          # ----- Save info -----
+              dl_url = None
+              for _ in range(150):
+                  time.sleep(2)
+                  r = s.get(status_url, timeout=20)
+                  status = r.json()
+                  if status.get('status') == 'completed':
+                      dl_url = status.get('downloadUrl')
+                      break
+                  if status.get('status') == 'failed':
+                      print(f"::error::Server failed to prepare: {title}")
+                      sys.exit(1)
+
+              if not dl_url:
+                  print(f"::error::Could not get download link for {title}")
+                  sys.exit(1)
+
+              # ساخت نام فایل و پوشه
+              video_id = re.search(r'(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})', url)
+              video_id = video_id[1] if video_id else 'unknown'
+              
+              clean_title = re.sub(r'[^a-zA-Z0-9\-_()\[\]]', '_', title.replace(' ', '_'))
+              clean_title = re.sub(r'_+', '_', clean_title).strip('_')[:70]
+              if not clean_title:
+                  clean_title = video_id
+
+              timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+              filename = f"{clean_title}_{QUAL}_{timestamp}.{FMT}"
+              folder_name = f"{clean_title}_{QUAL}_{timestamp}"
+
+              results.append({
+                  'dl_url': dl_url,
+                  'filename': filename,
+                  'title': title,
+                  'folder': folder_name,
+                  'url': url
+              })
+
+          # ذخیره‌سازی نتایج
           with open(".download_info", "w", encoding="utf-8") as f:
-              f.write(f"{dl_url}\n{filename}\n{title}\n{folder_name}")
+              for r in results:
+                  f.write(f"{r['dl_url']}|{r['filename']}|{r['title']}|{r['folder']}\n")
 
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"filename={filename}\n")
-              f.write(f"title={title}\n")
-              f.write(f"folder={folder_name}\n")
+          # ساخت بدنه ریلیز
+          with open(".release_body.md", "w", encoding="utf-8") as f:
+              f.write("**📽️ YouTube Download (2 videos)**\n\n")
+              for i, r in enumerate(results, 1):
+                  f.write(f"### ویدیو {i}\n")
+                  f.write(f"- **عنوان:** {r['title']}\n")
+                  f.write(f"- **لینک اصلی:** {r['url']}\n")
+                  f.write(f"- **کیفیت:** {QUAL}\n")
+                  f.write(f"- **فرمت:** {FMT}\n")
+                  f.write(f"- **پوشه:** `{r['folder']}`\n")
+                  f.write(f"- **نام فایل:** `{r['filename']}`\n\n")
+              f.write(f"**زمان دانلود:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n---\nPowered by Meli-Action ⚡\n")
           EOF
         env:
-          INPUT_URL:     ${{ github.event.inputs.video_url }}
-          INPUT_FORMAT:  ${{ github.event.inputs.output_format == 'mp3 (audio only)' && 'mp3' || 'mp4' }}
+          INPUT_URL_1: ${{ github.event.inputs.video_url_1 }}
+          INPUT_URL_2: ${{ github.event.inputs.video_url_2 }}
+          INPUT_FORMAT: ${{ github.event.inputs.output_format == 'mp3 (audio only)' && 'mp3' || 'mp4' }}
           INPUT_QUALITY: ${{ github.event.inputs.desired_quality }}
 
-      - name: 📥 Download File
+      - name: 📥 Download All Files
         run: |
-          DL_URL=$(head -1 .download_info)
-          FILENAME=$(sed -n '2p' .download_info)
-          FOLDER=$(sed -n '4p' .download_info)
-          mkdir -p "release_files/$FOLDER"
-          echo "Downloading: $FILENAME into folder $FOLDER"
-          curl -L --fail --progress-bar -o "release_files/$FOLDER/$FILENAME" "$DL_URL"
-          if [ ! -s "release_files/$FOLDER/$FILENAME" ]; then
-            echo "::error::Downloaded file is empty!"
-            exit 1
-          fi
+          while IFS='|' read -r DL_URL FILENAME TITLE FOLDER; do
+            echo "📥 Downloading: $FILENAME → folder $FOLDER"
+            mkdir -p "release_files/$FOLDER"
+            curl -L --fail --progress-bar -o "release_files/$FOLDER/$FILENAME" "$DL_URL"
+            if [ ! -s "release_files/$FOLDER/$FILENAME" ]; then
+              echo "::error::File $FILENAME is empty!"
+              exit 1
+            fi
+          done < .download_info
 
-      - name: ✂️ Split Large File (if needed)
+      - name: ✂️ Split Large Files (if needed)
         run: |
-          FILENAME="${{ steps.retrieve.outputs.filename }}"
-          FOLDER="${{ steps.retrieve.outputs.folder }}"
           THRESH_MB="${{ github.event.inputs.max_part_mb }}"
           if [[ "$THRESH_MB" -le 0 ]] || [[ "$THRESH_MB" -gt 1900 ]]; then
             THRESH_MB=1800
           fi
-          cd "release_files/$FOLDER"
-          FILESIZE=$(stat -c%s "$FILENAME" 2>/dev/null || echo 0)
-          THRESH_BYTES=$((THRESH_MB * 1024 * 1024))
+          while IFS='|' read -r DL_URL FILENAME TITLE FOLDER; do
+            cd "release_files/$FOLDER"
+            FILESIZE=$(stat -c%s "$FILENAME" 2>/dev/null || echo 0)
+            THRESH_BYTES=$((THRESH_MB * 1024 * 1024))
+            if [ "$FILESIZE" -gt "$THRESH_BYTES" ]; then
+              echo "🔪 Splitting $FILENAME into ${THRESH_MB}MB parts..."
+              BASE="${FILENAME%.*}"
+              zip -r -s "${THRESH_MB}m" "${BASE}.zip" -- "$FILENAME"
+              rm -- "$FILENAME"
+              echo "Parts created:"
+              ls -lh
+            else
+              echo "📦 No split needed for $FILENAME ($(( FILESIZE / 1024 / 1024 )) MB)"
+            fi
+            cd ../..
+          done < .download_info
 
-          if [ "$FILESIZE" -gt "$THRESH_BYTES" ]; then
-            echo "🔪 Splitting into ${THRESH_MB}MB parts inside $FOLDER..."
-            BASE="${FILENAME%.*}"
-            zip -r -s "${THRESH_MB}m" "${BASE}.zip" -- "$FILENAME"
-            rm -- "$FILENAME"
-            echo "Parts created:"
-            ls -lh
-          else
-            echo "📦 No split needed ($(( FILESIZE / 1024 / 1024 )) MB)"
-          fi
-          cd ../..
-
-      - name: 📅 Get Current Date
-        id: get_date
-        run: echo "date=$(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
-
-      - name: 📤 Push to Repository (هر ویدیو در پوشه مجزا)
+      - name: 📤 Push to Repository (both folders)
         if: github.event.inputs.upload_method == 'repository (push to repo)'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # همگام‌سازی با آخرین تغییرات ریموت
           git pull --rebase --strategy-option=theirs origin main
-          
-          FOLDER="${{ steps.retrieve.outputs.folder }}"
           mkdir -p downloads
-          if [ -d "release_files/$FOLDER" ]; then
-            mv "release_files/$FOLDER" "downloads/"
-            git add "downloads/$FOLDER"
-            git commit -m "📁 ویدیو جدید: $FOLDER [skip ci]" || echo "No new files to commit"
-            git push origin main
+          while IFS='|' read -r DL_URL FILENAME TITLE FOLDER; do
+            if [ -d "release_files/$FOLDER" ]; then
+              mv "release_files/$FOLDER" "downloads/"
+            fi
+          done < .download_info
+          git add downloads/
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
           else
-            echo "Folder not found, skipping push"
+            git commit -m "📁 دو ویدیو جدید اضافه شد [skip ci]"
+            git push origin main
           fi
 
-      - name: 📤 Upload to GitHub Releases (با حفظ نام پوشه در توضیحات)
+      - name: 📤 Upload to GitHub Releases (both videos)
         if: github.event.inputs.upload_method == 'release (GitHub Releases)'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.release_tag != '' && github.event.inputs.release_tag || format('yt-{0}', github.run_number) }}
-          name: ${{ format('YouTube - {0}', steps.retrieve.outputs.filename) }}
-          body: |
-            **📽️ YouTube Download**
-
-            **Title:** ${{ steps.retrieve.outputs.title }}
-            **Original Link:** ${{ github.event.inputs.video_url }}
-            **Quality:** ${{ github.event.inputs.desired_quality }}
-            **Format:** ${{ github.event.inputs.output_format }}
-            **Downloaded on:** ${{ steps.get_date.outputs.date }}
-            **Folder name:** `${{ steps.retrieve.outputs.folder }}`
-
-            ---
-            Powered by Meli-Action ⚡
-          files: release_files/${{ steps.retrieve.outputs.folder }}/*
+          name: ${{ format('YouTube - {0}', github.run_number) }}
+          body_path: .release_body.md
+          files: release_files/*/*
           token: ${{ secrets.GITHUB_TOKEN }}
           draft: false
           prerelease: false
 
       - name: 🧹 Cleanup
         if: always()
-        run: rm -rf release_files .download_info 2>/dev/null || true
+        run: rm -rf release_files .download_info .release_body.md 2>/dev/null || true
