@@ -259,19 +259,17 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git pull --rebase --strategy-option=theirs origin main
           mkdir -p downloads
-          # انتقال فولدرها به downloads
           while IFS='|' read -r DL_URL FILENAME TITLE FOLDER; do
             if [ -d "release_files/$FOLDER" ]; then
               mv "release_files/$FOLDER" "downloads/"
             fi
           done < .download_info
 
-          # افزودن لینک‌های Raw به README.md
           python3 << 'EOF'
           import os, urllib.parse
 
-          repo = os.environ['GITHUB_REPOSITORY']
-          branch = os.environ['GITHUB_REF_NAME']
+          repo = os.environ['GITHUB_REPOSITORY']        # e.g. rtrasa0/Do
+          branch = os.environ['GITHUB_REF_NAME']        # e.g. main
           info_file = '.download_info'
           readme = 'README.md'
           entries = []
@@ -285,11 +283,14 @@ jobs:
                   folder_path = f'downloads/{folder}'
                   if not os.path.isdir(folder_path):
                       continue
-                  # تمام فایل‌های داخل پوشه (مثلاً فایل اصلی یا تکه‌های zip)
+                  # تمام فایل‌های داخل پوشه (فایل اصلی یا تکه‌های zip)
                   for fname in os.listdir(folder_path):
-                      enc_fname = urllib.parse.quote(fname, safe='')
-                      raw_url = f'https://raw.githubusercontent.com/{repo}/{branch}/downloads/{folder}/{enc_fname}'
-                      entries.append(f'- [{fname}]({raw_url})  ({title})')
+                      # URL-encode نام پوشه و فایل (جداگانه)
+                      enc_folder = urllib.parse.quote(folder, safe='')
+                      enc_fname  = urllib.parse.quote(fname, safe='')
+                      raw_url = f'https://github.com/{repo}/raw/refs/heads/{branch}/downloads/{enc_folder}/{enc_fname}'
+                      # برای جلوگیری از شکسته شدن Markdown توسط پرانتز، لینک را داخل <> بگذار
+                      entries.append(f'- [{fname}](<{raw_url}>)  ({title})')
 
           if entries:
               with open(readme, 'a', encoding='utf-8') as f:
