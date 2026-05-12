@@ -17,7 +17,7 @@ on:
       max_part_mb:
         description: "Maximum size per part (MB)"
         required: false
-        default: "90"
+        default: "94"
         type: string
 
       upload_method:
@@ -48,11 +48,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Install Dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y p7zip-full curl
+          sudo apt-get install -y p7zip-full curl zip
 
       - name: Download File
         id: download
@@ -65,16 +66,26 @@ jobs:
           FILENAME=$(basename "$FILE_URL" | cut -d'?' -f1)
           FILENAME=$(echo "$FILENAME" | sed 's/[^a-zA-Z0-9._() -]/_/g')
 
-          echo "Downloading: $FILENAME"
+          # اضافه کردن timestamp به اسم فایل برای جلوگیری از تکراری شدن
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          BASENAME="${FILENAME%.*}"
+          EXT="${FILENAME##*.}"
+          if [ "$BASENAME" = "$EXT" ]; then
+            FINAL_FILENAME="${FILENAME}_${TIMESTAMP}"
+          else
+            FINAL_FILENAME="${BASENAME}_${TIMESTAMP}.${EXT}"
+          fi
 
-          curl -L --fail --retry 3 \
-            -o "temp_dl/$FILENAME" \
+          echo "Downloading: $FINAL_FILENAME"
+
+          curl -L --fail --retry 3 --progress-bar \
+            -o "temp_dl/$FINAL_FILENAME" \
             "$FILE_URL"
 
-          echo "filename=$FILENAME" >> "$GITHUB_OUTPUT"
-          echo "filepath=temp_dl/$FILENAME" >> "$GITHUB_OUTPUT"
+          echo "filename=$FINAL_FILENAME" >> "$GITHUB_OUTPUT"
+          echo "filepath=temp_dl/$FINAL_FILENAME" >> "$GITHUB_OUTPUT"
 
-      - name: Create Split Archive
+      - name: Check File Size and Create Split Archive
         id: archive
         shell: bash
         run: |
@@ -82,29 +93,54 @@ jobs:
           PASS="${{ github.event.inputs.zip_password }}"
           THRESH_MB="${{ github.event.inputs.max_part_mb }}"
 
-          if [[ -z "$THRESH_MB" || "$THRESH_MB" -le 0 || "$THRESH_MB" -gt 1900 ]]; then
-            THRESH_MB=1800
+          # تنظیم حداکثر حجم قطعات (حداکثر 94 مگابایت برای امنیت بیشتر)
+          if [[ -z "$THRESH_MB" || "$THRESH_MB" -le 0 || "$THRESH_MB" -gt 94 ]]; then
+            THRESH_MB=94
           fi
-
-          BASENAME=$(basename "$FILEPATH")
 
           cd temp_dl || exit 1
+          
+          ORIG_FILENAME=$(basename "$FILEPATH")
+          ARCHIVE_BASE="${ORIG_FILENAME%.*}_archive"
 
-          ARCHIVE_BASE="${BASENAME%.*}_$(date +%Y%m%d_%H%M%S)"
+          # بررسی حجم فایل اصلی
+          FILESIZE=$(stat -c%s "$ORIG_FILENAME" 2>/dev/null || stat -f%z "$ORIG_FILENAME" 2>/dev/null || echo 0)
+          THRESH_BYTES=$((THRESH_MB * 1024 * 1024))
 
-          if [ -n "$PASS" ]; then
-            7z a -p"$PASS" -mhe=on -mx=3 -v${THRESH_MB}m "${ARCHIVE_BASE}.7z" "$BASENAME"
+          if [ "$FILESIZE" -gt "$THRESH_BYTES" ]; then
+            echo "File size: $((FILESIZE / 1024 / 1024)) MB - Splitting into ${THRESH_MB}MB parts"
+            
+            if [ -n "$PASS" ]; then
+              7z a -p"$PASS" -mhe=on -mx=3 -v${THRESH_MB}m "${ARCHIVE_BASE}.7z" "$ORIG_FILENAME"
+            else
+              7z a -mx=3 -v${THRESH_MB}m "${ARCHIVE_BASE}.7z" "$ORIG_FILENAME"
+            fi
+            
+            # حذف فایل اصلی بعد از اسپلیت
+            rm -f "$ORIG_FILENAME"
+            
+            echo "split_done=true" >> "$GITHUB_OUTPUT"
           else
-            7z a -mx=3 -v${THRESH_MB}m "${ARCHIVE_BASE}.7z" "$BASENAME"
+            echo "File size: $((FILESIZE / 1024 / 1024)) MB - No split needed (below ${THRESH_MB}MB)"
+            
+            # اگر فایل کوچک است و پسورد دارد، زیپ کن
+            if [ -n "$PASS" ]; then
+              7z a -p"$PASS" -mhe=on -mx=3 "${ARCHIVE_BASE}.7z" "$ORIG_FILENAME"
+              rm -f "$ORIG_FILENAME"
+            fi
+            
+            echo "split_done=false" >> "$GITHUB_OUTPUT"
           fi
-
-          if [ -f "${ARCHIVE_BASE}.7z.001" ] && [ ! -f "${ARCHIVE_BASE}.7z.002" ]; then
-            mv "${ARCHIVE_BASE}.7z.001" "${ARCHIVE_BASE}.7z"
-          fi
-
-          echo "archive_name=${ARCHIVE_BASE}.7z" >> "$GITHUB_OUTPUT"
-
+          
+          echo "archive_base=${ARCHIVE_BASE}" >> "$GITHUB_OUTPUT"
+          
           cd ..
+
+      - name: List Files After Split
+        shell: bash
+        run: |
+          echo "Files in temp_dl:"
+          ls -lah temp_dl/
 
       - name: Get Current Date
         id: get_date
@@ -119,16 +155,35 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          mkdir -p downloads
+          # همگام‌سازی با آخرین تغییرات ریموت
+          git pull --rebase --strategy-option=theirs origin main
 
-          mv temp_dl/* downloads/ 2>/dev/null || true
+          # ایجاد پوشه با نام فایل اصلی برای سازماندهی بهتر
+          ORIG_NAME="${{ steps.download.outputs.filename }}"
+          FOLDER_NAME="${ORIG_NAME%.*}_$(date +%Y%m%d_%H%M%S)"
+          FOLDER_NAME=$(echo "$FOLDER_NAME" | sed 's/[^a-zA-Z0-9._() -]/_/g')
+          
+          mkdir -p "downloads/$FOLDER_NAME"
+
+          # انتقال تمام فایل‌های temp_dl به پوشه مقصد
+          if [ -d "temp_dl" ] && [ -n "$(ls -A temp_dl 2>/dev/null)" ]; then
+            mv temp_dl/* "downloads/$FOLDER_NAME/" 2>/dev/null || true
+            echo "Moved files to downloads/$FOLDER_NAME/"
+          fi
+
+          # اضافه کردن فایل README داخل پوشه برای توضیحات
+          cat > "downloads/$FOLDER_NAME/README.txt" << EOF
+Original File: ${{ steps.download.outputs.filename }}
+Download Date: ${{ steps.get_date.outputs.date }}
+Source URL: ${{ github.event.inputs.file_url }}
+Split Size: ${{ github.event.inputs.max_part_mb }}MB per part
+Password: ${{ github.event.inputs.zip_password != '' && 'Yes (password protected)' || 'No password' }}
+EOF
 
           git add downloads/
 
           git commit -m "Direct Download: ${{ steps.download.outputs.filename }} [skip ci]" || echo "Nothing to commit"
 
-          # رفع مشکل push با دریافت و rebase تغییرات remote
-          git pull --rebase origin main
           git push origin main
 
       - name: Upload to GitHub Releases
@@ -136,14 +191,19 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.release_tag != '' && github.event.inputs.release_tag || format('direct-{0}', github.run_number) }}
-          name: Direct Download Release
+          name: Direct Download - ${{ steps.download.outputs.filename }}
           body: |
-            Direct download completed.
+            **📥 Direct Download**
 
-            File: ${{ steps.download.outputs.filename }}
-            Date: ${{ steps.get_date.outputs.date }}
+            **Original File:** ${{ steps.download.outputs.filename }}
+            **Source URL:** ${{ github.event.inputs.file_url }}
+            **Downloaded on:** ${{ steps.get_date.outputs.date }}
+            **Split Size:** ${{ github.event.inputs.max_part_mb }}MB per part
+            **Password Protected:** ${{ github.event.inputs.zip_password != '' && 'Yes' || 'No' }}
+
+            ---
+            Powered by Meli-Action ⚡
           files: temp_dl/*
-
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
