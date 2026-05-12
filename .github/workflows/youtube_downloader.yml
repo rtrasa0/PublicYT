@@ -27,7 +27,7 @@ on:
         description: 'حداکثر حجم هر قسمت (MB) - 0 = خودکار ۱۸۰۰ مگابایت'
         required: false
         type: string
-        default: '95'
+        default: '94'
 
       upload_method:
         description: '📤 روش ذخیره نهایی'
