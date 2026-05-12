@@ -17,7 +17,7 @@ on:
       max_part_mb:
         description: "Maximum size per part (MB)"
         required: false
-        default: "1800"
+        default: "90"
         type: string
 
       upload_method:
