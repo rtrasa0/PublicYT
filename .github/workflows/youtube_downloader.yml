@@ -133,19 +133,20 @@ jobs:
               print("::error::Could not get download link")
               sys.exit(1)
 
-          # ----- Generate safe filename and folder name -----
-          video_id = re.search(r'(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})', URL)[1]
-          clean_title = re.sub(r'[^a-zA-Z0-9\-_()\[\]]', '_', title.replace(' ', '_'))
-          clean_title = re.sub(r'_+', '_', clean_title).strip('_')[:70] or video_id
-          filename = f"{clean_title}_{video_id}_{QUAL}.{FMT}"
+          # ----- ساخت نام فایل و پوشه با عنوان، کیفیت و زمان -----
+          video_id = re.search(r'(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})', URL)
+          video_id = video_id[1] if video_id else 'unknown'
           
-          # ساخت نام پوشه (اگر عنوان تکراری شد، فقط از video_id استفاده کن)
+          clean_title = re.sub(r'[^a-zA-Z0-9\-_()\[\]]', '_', title.replace(' ', '_'))
+          clean_title = re.sub(r'_+', '_', clean_title).strip('_')[:70]
+          if not clean_title:
+              clean_title = video_id
+
           timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-          if clean_title == video_id:
-              folder_name = f"{video_id}_{timestamp}"
-          else:
-              folder_name = f"{clean_title}_{video_id}_{timestamp}"
-          folder_name = re.sub(r'[^a-zA-Z0-9\-_()\[\]]', '_', folder_name)
+          
+          # ترکیب نهایی: عنوان + کیفیت + زمان
+          filename = f"{clean_title}_{QUAL}_{timestamp}.{FMT}"
+          folder_name = f"{clean_title}_{QUAL}_{timestamp}"
 
           # ----- Save info -----
           with open(".download_info", "w", encoding="utf-8") as f:
