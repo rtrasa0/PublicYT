@@ -1,4 +1,4 @@
-name: دانلودر یوتیوب 
+name: دانلودر یوتیوب (۵ ویدیو همزمان)
 
 on:
   workflow_dispatch:
@@ -7,9 +7,20 @@ on:
         description: '🎬 لینک اول'
         required: true
         type: string
-
       video_url_2:
         description: '🎬 لینک دوم'
+        required: true
+        type: string
+      video_url_3:
+        description: '🎬 لینک سوم'
+        required: true
+        type: string
+      video_url_4:
+        description: '🎬 لینک چهارم'
+        required: true
+        type: string
+      video_url_5:
+        description: '🎬 لینک پنجم'
         required: true
         type: string
 
@@ -55,7 +66,7 @@ permissions:
 jobs:
   youtube-download:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 60
 
     steps:
       - name: 📂 Checkout Repository
@@ -70,19 +81,25 @@ jobs:
           sudo apt-get install -y zip curl python3 python3-pip
           pip3 install --quiet requests
 
-      - name: 🔗 Get Download Links (two videos)
+      - name: 🔗 Get Download Links (up to 5 videos)
         run: |
           python3 << 'EOF'
           import os, sys, time, re, requests
           from datetime import datetime
 
-          URLS = [
-            os.environ.get('INPUT_URL_1'),
-            os.environ.get('INPUT_URL_2')
-          ]
+          # جمع‌آوری لینک‌ها (لینک‌های خالی حذف می‌شوند)
+          urls = []
+          for i in range(1, 6):
+              u = os.environ.get(f'INPUT_URL_{i}', '').strip()
+              if u:
+                  urls.append(u)
+
+          if not urls:
+              print("::error::No valid URLs provided")
+              sys.exit(1)
+
           FMT  = os.environ.get('INPUT_FORMAT')
           QUAL = os.environ.get('INPUT_QUALITY')
-
           is_audio = (FMT == 'mp3')
 
           # ----- Quality validation -----
@@ -102,11 +119,7 @@ jobs:
           s.get("https://media.ytmp3.gg/")
 
           results = []
-          for url in URLS:
-              if not url or not url.strip():
-                  print("::error::One of the URLs is empty")
-                  sys.exit(1)
-
+          for url in urls:
               print(f"Processing: {url}")
               payload = {
                   "url": url,
@@ -144,10 +157,9 @@ jobs:
                   print(f"::error::Could not get download link for {title}")
                   sys.exit(1)
 
-              # ساخت نام فایل و پوشه
+              # ساخت نام فایل و پوشه (شامل عنوان، کیفیت، زمان)
               video_id = re.search(r'(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})', url)
               video_id = video_id[1] if video_id else 'unknown'
-              
               clean_title = re.sub(r'[^a-zA-Z0-9\-_()\[\]]', '_', title.replace(' ', '_'))
               clean_title = re.sub(r'_+', '_', clean_title).strip('_')[:70]
               if not clean_title:
@@ -165,14 +177,14 @@ jobs:
                   'url': url
               })
 
-          # ذخیره‌سازی نتایج
+          # ----- ذخیره اطلاعات دانلود -----
           with open(".download_info", "w", encoding="utf-8") as f:
               for r in results:
                   f.write(f"{r['dl_url']}|{r['filename']}|{r['title']}|{r['folder']}\n")
 
-          # ساخت بدنه ریلیز
+          # ----- ساخت بدنه ریلیز (نمایش عنوان‌ها) -----
           with open(".release_body.md", "w", encoding="utf-8") as f:
-              f.write("**📽️ YouTube Download (2 videos)**\n\n")
+              f.write(f"**📽️ YouTube Download ({len(results)} videos)**\n\n")
               for i, r in enumerate(results, 1):
                   f.write(f"### ویدیو {i}\n")
                   f.write(f"- **عنوان:** {r['title']}\n")
@@ -182,17 +194,34 @@ jobs:
                   f.write(f"- **پوشه:** `{r['folder']}`\n")
                   f.write(f"- **نام فایل:** `{r['filename']}`\n\n")
               f.write(f"**زمان دانلود:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n---\nPowered by Meli-Action ⚡\n")
+
+          # ----- نام ریلیز (بر اساس عناوین) -----
+          release_name = ", ".join(r['title'] for r in results)
+          if len(release_name) > 100:
+              release_name = f"{results[0]['title']} ... (total {len(results)} videos)"
+          with open(".release_name.txt", "w", encoding="utf-8") as f:
+              f.write(release_name)
+
+          # ----- پیام commit (در صورت push) -----
+          commit_msg = "📁 " + " | ".join(r['title'][:40] for r in results)
+          if len(commit_msg) > 250:
+              commit_msg = f"📁 {len(results)} ویدیو جدید دانلود شد"
+          with open(".commit_msg.txt", "w", encoding="utf-8") as f:
+              f.write(commit_msg)
           EOF
         env:
           INPUT_URL_1: ${{ github.event.inputs.video_url_1 }}
           INPUT_URL_2: ${{ github.event.inputs.video_url_2 }}
+          INPUT_URL_3: ${{ github.event.inputs.video_url_3 }}
+          INPUT_URL_4: ${{ github.event.inputs.video_url_4 }}
+          INPUT_URL_5: ${{ github.event.inputs.video_url_5 }}
           INPUT_FORMAT: ${{ github.event.inputs.output_format == 'mp3 (audio only)' && 'mp3' || 'mp4' }}
           INPUT_QUALITY: ${{ github.event.inputs.desired_quality }}
 
       - name: 📥 Download All Files
         run: |
           while IFS='|' read -r DL_URL FILENAME TITLE FOLDER; do
-            echo "📥 Downloading: $FILENAME → folder $FOLDER"
+            echo "📥 Downloading: $FILENAME (Title: $TITLE) → folder $FOLDER"
             mkdir -p "release_files/$FOLDER"
             curl -L --fail --progress-bar -o "release_files/$FOLDER/$FILENAME" "$DL_URL"
             if [ ! -s "release_files/$FOLDER/$FILENAME" ]; then
@@ -224,7 +253,7 @@ jobs:
             cd ../..
           done < .download_info
 
-      - name: 📤 Push to Repository (both folders)
+      - name: 📤 Push to Repository (all folders)
         if: github.event.inputs.upload_method == 'repository (push to repo)'
         run: |
           git config user.name  "github-actions[bot]"
@@ -237,19 +266,20 @@ jobs:
             fi
           done < .download_info
           git add downloads/
+          COMMIT_MSG=$(cat .commit_msg.txt)
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "📁 دو ویدیو جدید اضافه شد [skip ci]"
+            git commit -m "$COMMIT_MSG"
             git push origin main
           fi
 
-      - name: 📤 Upload to GitHub Releases (both videos)
+      - name: 📤 Upload to GitHub Releases (all videos)
         if: github.event.inputs.upload_method == 'release (GitHub Releases)'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.release_tag != '' && github.event.inputs.release_tag || format('yt-{0}', github.run_number) }}
-          name: ${{ format('YouTube - {0}', github.run_number) }}
+          name: ${{ steps.get_release_name.outputs.name || format('YouTube - {0}', github.run_number) }}
           body_path: .release_body.md
           files: release_files/*/*
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -258,4 +288,4 @@ jobs:
 
       - name: 🧹 Cleanup
         if: always()
-        run: rm -rf release_files .download_info .release_body.md 2>/dev/null || true
+        run: rm -rf release_files .download_info .release_body.md .release_name.txt .commit_msg.txt 2>/dev/null || true
