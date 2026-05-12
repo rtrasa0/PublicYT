@@ -1,27 +1,26 @@
-name: دانلودر یوتیوب
-
+name: دانلودر یوتیوب 
 on:
   workflow_dispatch:
     inputs:
       video_url_1:
         description: '🎬 لینک اول'
-        required: true
+        required: false              # حالا اختیاری
         type: string
       video_url_2:
-        description: '🎬 لینک دوم'
-        required: true
+        description: '🎬 لینک دوم (اختیاری)'
+        required: false
         type: string
       video_url_3:
-        description: '🎬 لینک سوم'
-        required: true
+        description: '🎬 لینک سوم (اختیاری)'
+        required: false
         type: string
       video_url_4:
-        description: '🎬 لینک چهارم'
-        required: true
+        description: '🎬 لینک چهارم (اختیاری)'
+        required: false
         type: string
       video_url_5:
-        description: '🎬 لینک پنجم'
-        required: true
+        description: '🎬 لینک پنجم (اختیاری)'
+        required: false
         type: string
 
       output_format:
@@ -40,7 +39,7 @@ on:
         default: '360p'
 
       max_part_mb:
-        description: 'حداکثر حجم هر قسمت (MB) - 0 = خودکار ۱۸۰۰ مگابایت'
+        description: 'حداکثر حجم هر قسمت'
         required: false
         type: string
         default: '94'
@@ -87,7 +86,7 @@ jobs:
           import os, sys, time, re, requests
           from datetime import datetime
 
-          # جمع‌آوری لینک‌ها (لینک‌های خالی حذف می‌شوند)
+          # جمع‌آوری لینک‌ها (فقط آنهایی که پر شده‌اند)
           urls = []
           for i in range(1, 6):
               u = os.environ.get(f'INPUT_URL_{i}', '').strip()
@@ -279,7 +278,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.release_tag != '' && github.event.inputs.release_tag || format('yt-{0}', github.run_number) }}
-          name: ${{ steps.get_release_name.outputs.name || format('YouTube - {0}', github.run_number) }}
+          name: ${{ github.event.inputs.release_tag != '' && github.event.inputs.release_tag || format('YouTube - {0}', github.run_number) }}
           body_path: .release_body.md
           files: release_files/*/*
           token: ${{ secrets.GITHUB_TOKEN }}
