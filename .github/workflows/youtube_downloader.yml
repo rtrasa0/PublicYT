@@ -268,7 +268,7 @@ jobs:
           python3 << 'EOF'
           import os, urllib.parse
 
-          repo = os.environ['GITHUB_REPOSITORY']        # e.g. rtrasa0/Do
+          repo = os.environ['GITHUB_REPOSITORY']        # e.g. rtrasa0/PublicYT
           branch = os.environ['GITHUB_REF_NAME']        # e.g. main
           info_file = '.download_info'
           readme = 'README.md'
