@@ -1,4 +1,4 @@
-name: دانلودر یوتیوب (۵ ویدیو همزمان)
+name: دانلودر یوتیوب
 
 on:
   workflow_dispatch:
