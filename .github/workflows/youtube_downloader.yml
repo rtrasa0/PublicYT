@@ -252,19 +252,55 @@ jobs:
             cd ../..
           done < .download_info
 
-      - name: 📤 Push to Repository (all folders)
+      - name: 📤 Push to Repository (and update README with raw links)
         if: github.event.inputs.upload_method == 'repository (push to repo)'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git pull --rebase --strategy-option=theirs origin main
           mkdir -p downloads
+          # انتقال فولدرها به downloads
           while IFS='|' read -r DL_URL FILENAME TITLE FOLDER; do
             if [ -d "release_files/$FOLDER" ]; then
               mv "release_files/$FOLDER" "downloads/"
             fi
           done < .download_info
-          git add downloads/
+
+          # افزودن لینک‌های Raw به README.md
+          python3 << 'EOF'
+          import os, urllib.parse
+
+          repo = os.environ['GITHUB_REPOSITORY']
+          branch = os.environ['GITHUB_REF_NAME']
+          info_file = '.download_info'
+          readme = 'README.md'
+          entries = []
+
+          with open(info_file, 'r', encoding='utf-8') as f:
+              for line in f:
+                  line = line.strip()
+                  if not line:
+                      continue
+                  dl_url, filename, title, folder = line.split('|', 3)
+                  folder_path = f'downloads/{folder}'
+                  if not os.path.isdir(folder_path):
+                      continue
+                  # تمام فایل‌های داخل پوشه (مثلاً فایل اصلی یا تکه‌های zip)
+                  for fname in os.listdir(folder_path):
+                      enc_fname = urllib.parse.quote(fname, safe='')
+                      raw_url = f'https://raw.githubusercontent.com/{repo}/{branch}/downloads/{folder}/{enc_fname}'
+                      entries.append(f'- [{fname}]({raw_url})  ({title})')
+
+          if entries:
+              with open(readme, 'a', encoding='utf-8') as f:
+                  f.write('\n---\n')
+                  for e in entries:
+                      f.write(e + '\n')
+          else:
+              print("⚠️ No files found to add to README")
+          EOF
+
+          git add downloads/ README.md
           COMMIT_MSG=$(cat .commit_msg.txt)
           if git diff --cached --quiet; then
             echo "No changes to commit"
